@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+
+# Generated / downloaded data
+corpus/
+dump/
+continuity/
+conversion.log
+
+# Packaged distribution — rebuild with `uv run package.py`, upload, don't commit.
+dist/
+
+# Resume ledgers and the mmap'd search index. Machine-local, and the index is
+# ~365 MB; both are rebuilt on demand.
+.index/
+paraphrase_state/
+question_state/
+sft_state/
+
+# Q&A stage output. Large, regenerable, and distributed as Parquet instead.
+questions/
+sft/
