@@ -57,10 +57,10 @@ Requirements:
     DEEPSEEK_API_KEY in the environment
 
 Usage:
-    uv run generate_questions.py --sample 3000 --dry-run   # cost estimate only
-    uv run generate_questions.py --sample 300 --keep-evidence   # smoke test
-    uv run generate_questions.py                           # full corpus
-    uv run generate_questions.py --types multihop,causal   # one flavour only
+    uv run scripts/generate_questions.py --sample 3000 --dry-run   # cost estimate only
+    uv run scripts/generate_questions.py --sample 300 --keep-evidence   # smoke test
+    uv run scripts/generate_questions.py                           # full corpus
+    uv run scripts/generate_questions.py --types multihop,causal   # one flavour only
 
 Resume: rerun the same command. Articles already present in the output JSONL
 are skipped, and the questions already written seed the duplicate filter.
@@ -83,7 +83,8 @@ from pathlib import Path
 import httpx
 from tqdm import tqdm
 
-REPO_ROOT = Path(__file__).resolve().parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPTS_DIR.parent
 CORPUS_DIR = REPO_ROOT / "corpus"
 SOURCE_DIR = CORPUS_DIR / "wookieepedia"
 OUTPUT_DIR = REPO_ROOT / "questions"
@@ -200,7 +201,7 @@ def load_pc():
     articles are worth a request.
     """
     spec = importlib.util.spec_from_file_location(
-        "pc", REPO_ROOT / "paraphrase_corpus.py")
+        "pc", SCRIPTS_DIR / "paraphrase_corpus.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules["pc"] = module
     spec.loader.exec_module(module)

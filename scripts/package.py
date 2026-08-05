@@ -19,11 +19,11 @@ This script converts it, once, into the artifact people actually consume::
       SHA256SUMS
 
 Usage:
-    uv run package.py                       # build dist/ from corpus/
-    uv run package.py --dry-run             # print the plan, write nothing
-    uv run package.py --limit 500           # 500 docs per source, for a smoke test
-    uv run package.py --sources wikipedia   # one source
-    uv run package.py --include-restricted  # add books/scripts/subtitles (see below)
+    uv run scripts/package.py                       # build dist/ from corpus/
+    uv run scripts/package.py --dry-run             # print the plan, write nothing
+    uv run scripts/package.py --limit 500           # 500 docs per source, for a smoke test
+    uv run scripts/package.py --sources wikipedia   # one source
+    uv run scripts/package.py --include-restricted  # add books/scripts/subtitles (see below)
 
 Restricted sources
 ------------------
@@ -57,7 +57,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
-REPO_ROOT = Path(__file__).resolve().parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPTS_DIR.parent
 CORPUS_DIR = REPO_ROOT / "corpus"
 QUESTION_FILE = REPO_ROOT / "questions" / "questions.jsonl"
 SFT_FILE = REPO_ROOT / "sft" / "sft.jsonl"
@@ -113,6 +114,41 @@ SOURCES = [
     Source("subtitles", (".txt",), "All rights reserved",
            "various rights holders", restricted=True),
 ]
+
+
+def augmented_sources() -> list[Source]:
+    """The corpus directories augment_corpus.py writes, read from its config.
+
+    A view -- timeline, quiz, entityflip -- is declared once in
+    augment_views.toml. Hardcoding its directory here as well is how the two
+    would drift, and the failure would be silent: a view that ran for days and
+    then never got packaged.
+
+    Every view is a rewrite of wookieepedia/, so it inherits that license and
+    points back at it. A missing or unparsable config yields nothing rather
+    than raising: augmentation is optional, and a build must not fail for
+    lacking an optional stage.
+    """
+    config = REPO_ROOT / "augment_views.toml"
+    if not config.exists():
+        return []
+    spec = importlib.util.spec_from_file_location(
+        "ac", SCRIPTS_DIR / "augment_corpus.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ac"] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:  # noqa: BLE001 - packaging must not depend on this stage
+        return []
+    return [
+        Source(out_dir, (".md",), "CC BY-SA 3.0",
+               f"Wookieepedia contributors (starwars.fandom.com), {name} rewrite",
+               derived_from="wookieepedia")
+        for name, out_dir in module.view_output_dirs(config).items()
+    ]
+
+
+SOURCES += augmented_sources()
 SOURCES_BY_NAME = {s.name: s for s in SOURCES}
 
 
@@ -132,7 +168,7 @@ def load_pc():
     global _PC
     if _PC is None:
         spec = importlib.util.spec_from_file_location(
-            "pc", REPO_ROOT / "paraphrase_corpus.py")
+            "pc", SCRIPTS_DIR / "paraphrase_corpus.py")
         _PC = importlib.util.module_from_spec(spec)
         sys.modules["pc"] = _PC
         spec.loader.exec_module(_PC)
@@ -260,9 +296,10 @@ def document_row(path: Path, source: Source) -> dict | None:
     if not url and source.name.startswith("wookieepedia"):
         url = wookieepedia_url(title)
 
-    # The paraphraser records its input path; fall back to the mirrored path,
-    # which is how the two trees line up by construction.
-    derived = meta.get("paraphrased_from")
+    # The paraphraser and the augmenter each record their input path under
+    # their own key; fall back to the mirrored path, which is how the trees
+    # line up by construction.
+    derived = meta.get("paraphrased_from") or meta.get("augmented_from")
     if not derived and source.derived_from:
         derived = f"{source.derived_from}/{path.relative_to(source.directory).as_posix()}"
 
@@ -711,13 +748,19 @@ def datasheet(stats: dict, sources: list[Source], restricted: bool,
         "2. `paraphrase_corpus.py` — every article rewritten by DeepSeek V4 "
         "Flash. Infoboxes and tables are preserved verbatim; only prose is "
         "rewritten.",
-        "3. `generate_questions.py` — questions mined per article, each with "
+        "3. `augment_corpus.py` — every article rewritten again into other "
+        "forms: an in-universe archive entry, a chronological timeline, a "
+        "dialogue, a Q&A set, atomic facts, a summary, a plain-language "
+        "explainer, and a pass that restates each relationship with the *other* "
+        "entity as the subject, so facts appear in both directions rather than "
+        "only the one the article happened to use.",
+        "4. `generate_questions.py` — questions mined per article, each with "
         "the evidence span that answers it. Train/eval split by *article*, not "
         "by question.",
-        "4. `answer_questions.py` — questions answered by a tool-using teacher "
+        "5. `answer_questions.py` — questions answered by a tool-using teacher "
         "(`wookiee_chat.py`) that may only read the corpus, never its own "
         "memory. The tool trace is discarded; the answer is kept.",
-        "5. `package.py` — this file.",
+        "6. `package.py` — this file.",
         "",
         "## Known gaps",
         "",
@@ -733,12 +776,12 @@ def datasheet(stats: dict, sources: list[Source], restricted: bool,
         # lists and table-only articles that paraphrase_corpus.py refuses to
         # send -- rewording a list of links produces noise, not variety -- so a
         # completion percentage here would report a design decision as a
-        # shortfall. `uv run count.py` splits the two apart.
+        # shortfall. `uv run scripts/count.py` splits the two apart.
         lines.append(
             f"- **{missing:,} of {base.rows:,} articles have no paraphrase.** "
             "Most are index lists and table-only articles that "
             "`paraphrase_corpus.py` skips by design; any remainder is work "
-            "still to do. `uv run count.py` separates the two.")
+            "still to do. `uv run scripts/count.py` separates the two.")
 
     # The `questions` config is the whole generated pool, answered ones
     # included -- answer_questions.py reads questions.jsonl and never removes
@@ -777,7 +820,7 @@ def datasheet(stats: dict, sources: list[Source], restricted: bool,
         "## Reproducing",
         "",
         "```",
-        f"uv run package.py --shard-mb {args.shard_mb}"
+        f"uv run scripts/package.py --shard-mb {args.shard_mb}"
         + (f" --limit {args.limit}" if args.limit else "")
         + (" --include-restricted" if restricted else ""),
         "```",

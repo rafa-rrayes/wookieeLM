@@ -42,10 +42,10 @@ Requirements:
     DEEPSEEK_API_KEY in the environment
 
 Usage:
-    uv run paraphrase_corpus.py --dry-run          # cost/token estimate only
-    uv run paraphrase_corpus.py --limit 50         # quick smoke test
-    uv run paraphrase_corpus.py                    # full run, many hours
-    uv run paraphrase_corpus.py --force            # redo existing outputs
+    uv run scripts/paraphrase_corpus.py --dry-run          # cost/token estimate only
+    uv run scripts/paraphrase_corpus.py --limit 50         # quick smoke test
+    uv run scripts/paraphrase_corpus.py                    # full run, many hours
+    uv run scripts/paraphrase_corpus.py --force            # redo existing outputs
 
 Resume: rerun the same command. Articles whose output file already exists are
 skipped, so an interrupted run picks up where it stopped. Articles that failed
@@ -69,7 +69,7 @@ from pathlib import Path
 import httpx
 from tqdm import tqdm
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS_DIR = REPO_ROOT / "corpus"
 SOURCE_DIR = CORPUS_DIR / "wookieepedia"
 OUTPUT_DIR = CORPUS_DIR / "wookieepedia_paraphrased1"

@@ -17,9 +17,9 @@ Requirements:
     pandoc on PATH   (brew install pandoc)
 
 Usage:
-    uv run download_wookieepedia.py                 # full run
-    uv run download_wookieepedia.py --limit 200     # quick smoke test
-    uv run download_wookieepedia.py --force         # reconvert existing files
+    uv run scripts/download_wookieepedia.py                 # full run
+    uv run scripts/download_wookieepedia.py --limit 200     # quick smoke test
+    uv run scripts/download_wookieepedia.py --force         # reconvert existing files
 
 Resume: rerun the same command. The dump download resumes byte-wise, the
 continuity lists are cached, and already-converted pages are skipped.
@@ -47,7 +47,7 @@ import py7zr
 from lxml import etree
 from tqdm import tqdm
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS_DIR = REPO_ROOT / "corpus"
 WOOKIEEPEDIA_DIR = CORPUS_DIR / "wookieepedia"
 CONTINUITY_DIR = REPO_ROOT / "continuity"

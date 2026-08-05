@@ -5,9 +5,9 @@
 ``README.md`` whose YAML frontmatter declares the configs, a datasheet, and
 checksums -- so this is only the transfer.
 
-    uv run upload_hf.py                          # dry run: list what would go
-    uv run upload_hf.py --repo user/name --push  # actually upload
-    uv run upload_hf.py --repo user/name --push --private
+    uv run scripts/upload_hf.py                          # dry run: list what would go
+    uv run scripts/upload_hf.py --repo user/name --push  # actually upload
+    uv run scripts/upload_hf.py --repo user/name --push --private
 
 Requires ``huggingface_hub`` and a token, from ``hf auth login`` or ``HF_TOKEN``:
 
@@ -28,7 +28,7 @@ import argparse
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
 
 
@@ -61,7 +61,7 @@ def main() -> int:
 
     dist = args.dist
     if not dist.is_dir():
-        print(f"{dist} does not exist -- run `uv run package.py` first.")
+        print(f"{dist} does not exist -- run `uv run scripts/package.py` first.")
         return 1
 
     if (dist / "restricted").is_dir():

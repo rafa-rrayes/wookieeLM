@@ -11,8 +11,8 @@ Cheap by default: the corpus is measured with stat() alone, so it is safe to
 run repeatedly while a job is working. Only the two Q&A JSONLs are read, since
 a record count cannot be had from a file size.
 
-    uv run count.py              # all three sections
-    uv run count.py --watch 10   # refresh every 10 s during a run
+    uv run scripts/count.py              # all three sections
+    uv run scripts/count.py --watch 10   # refresh every 10 s during a run
 
 The paraphrase denominator counts only articles paraphrase_corpus.py will
 actually send: stubs and index lists are skipped by design, so counting them
@@ -34,7 +34,8 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPTS_DIR.parent
 CORPUS_DIR = REPO_ROOT / "corpus"
 SOURCE_DIR = CORPUS_DIR / "wookieepedia"
 OUTPUT_DIR = CORPUS_DIR / "wookieepedia_paraphrased1"
@@ -54,12 +55,35 @@ DOC_SUFFIXES = (".md", ".txt")
 # text: counting them would inflate every column.
 NON_DOCUMENTS = {"manifest.md", "manifest.jsonl",
                  "articles.txt", "articles.jsonl", "categories.txt"}
-# Paraphrases are a rewrite of wookieepedia/, not new material, so they are
-# reported apart from the source total rather than added to it.
-DERIVED = {OUTPUT_DIR.name}
-# Both wookieepedia trees hold Markdown only; pinning them keeps the inventory
-# counts identical to the set a paraphrase run enumerates.
-SUFFIXES_BY_SOURCE = {SOURCE_DIR.name: (".md",), OUTPUT_DIR.name: (".md",)}
+
+def augmented_dirs() -> set[str]:
+    """The corpus directories augment_corpus.py writes, per its config.
+
+    Read straight out of the TOML rather than by importing augment_corpus --
+    that module pulls in httpx and tqdm, and this one runs under `--watch 1`
+    and does nothing but stat() files. Only `out_dir` is taken; what a view
+    *means* is still defined in exactly one place.
+    """
+    config = REPO_ROOT / "augment_views.toml"
+    if not config.exists():
+        return set()
+    try:
+        import tomllib
+
+        views = tomllib.loads(config.read_text(encoding="utf-8")).get("views", {})
+        return {v["out_dir"] for v in views.values() if v.get("out_dir")}
+    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+        return set()
+
+
+# Paraphrases and augmentations are rewrites of wookieepedia/, not new
+# material, so they are reported apart from the source total rather than added
+# to it.
+DERIVED = {OUTPUT_DIR.name} | augmented_dirs()
+# Every wookieepedia tree holds Markdown only; pinning them keeps the inventory
+# counts identical to the set a paraphrase or augment run enumerates.
+SUFFIXES_BY_SOURCE = {name: (".md",)
+                      for name in {SOURCE_DIR.name, OUTPUT_DIR.name} | augmented_dirs()}
 
 # Account-level faults were never the article's fault; paraphrase_corpus.py
 # ignores them when resuming, so they are not counted as failures here either.
@@ -93,7 +117,7 @@ def load_pc():
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
-            "pc", REPO_ROOT / "paraphrase_corpus.py")
+            "pc", SCRIPTS_DIR / "paraphrase_corpus.py")
         _PC = importlib.util.module_from_spec(spec)
         sys.modules["pc"] = _PC
         spec.loader.exec_module(_PC)

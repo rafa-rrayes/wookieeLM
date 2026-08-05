@@ -70,15 +70,15 @@ before it is allowed to delete anything. Run a sample, read the
 ``unsupported`` field, then turn on ``--reject-unsupported``.
 
 Requirements:
-    DEEPSEEK_API_KEY in the environment (or a .env file beside this script)
+    DEEPSEEK_API_KEY in the environment (or a .env file at the repo root)
     ~400 MB of disk under .index/ for the full-text index that backs
     search_text -- built once, then mmapped by the scan pool (corpus_scan.py)
 
 Usage:
-    uv run answer_questions.py --sample 200 --dry-run   # cost estimate only
-    uv run answer_questions.py --sample 200             # smoke test
-    uv run answer_questions.py --continuity canon,legends,non-canon
-    uv run answer_questions.py                          # everything
+    uv run scripts/answer_questions.py --sample 200 --dry-run   # cost estimate only
+    uv run scripts/answer_questions.py --sample 200             # smoke test
+    uv run scripts/answer_questions.py --continuity canon,legends,non-canon
+    uv run scripts/answer_questions.py                          # everything
 
 Resume: rerun the same command. Questions already present in the output are
 skipped, as are ones recorded in ``sft_state/failures.jsonl``.
@@ -103,7 +103,8 @@ from pathlib import Path
 import httpx
 from tqdm import tqdm
 
-REPO_ROOT = Path(__file__).resolve().parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPTS_DIR.parent
 CORPUS_DIR = REPO_ROOT / "corpus"
 QUESTION_FILE = REPO_ROOT / "questions" / "questions.jsonl"
 OUTPUT_DIR = REPO_ROOT / "sft"
@@ -138,7 +139,7 @@ def load_module(name: str, filename: str):
     any of them here would let this script and the chatbot drift into
     disagreeing about what the chatbot does.
     """
-    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / filename)
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / filename)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)

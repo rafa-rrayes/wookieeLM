@@ -12,7 +12,7 @@ is rebuilt, not stored.
 
 ## Corpus
 
-`uv run count.py`, snapshot of 2026-08-04. The Q&A stages are still running, so
+`uv run scripts/count.py`, snapshot of 2026-08-04. The Q&A stages are still running, so
 those two numbers grow; run `count.py` for the current ones.
 
 | Source | Documents | Size | ~Tokens |
@@ -52,6 +52,14 @@ Wookieepedia XML dump
         │                                 kept verbatim — no sentence structure
         │                                 to vary, so rewording is just noise)
         │
+        ├─ augment_corpus.py ─────────► corpus/wookieepedia_<view>/
+        │                                (one config-driven engine, eight forms:
+        │                                 timeline, dialogue, quiz, atomic facts,
+        │                                 in-universe entry, summary, explainer,
+        │                                 and entityflip — the same relations
+        │                                 restated with the *other* entity as
+        │                                 subject, against the reversal curse)
+        │
         └─ generate_questions.py ─────► questions/questions.jsonl
                     │                    (each question + the evidence span
                     │                     that answers it)
@@ -77,40 +85,78 @@ the teacher is kept honest, not part of what is being taught.
 uv sync
 cp .env.example .env          # add DEEPSEEK_API_KEY
 
-uv run download_wookieepedia.py   # dump -> corpus/wookieepedia/ (~1h, no API key)
-uv run paraphrase_corpus.py       # -> corpus/wookieepedia_paraphrased1/
-uv run generate_questions.py      # -> questions/questions.jsonl
-uv run answer_questions.py        # -> sft/sft.jsonl
-uv run package.py                 # -> dist/*.parquet + README + DATASHEET
+uv run scripts/download_wookieepedia.py  # dump -> corpus/wookieepedia/ (~1h, no key)
+uv run scripts/paraphrase_corpus.py      # -> corpus/wookieepedia_paraphrased1/
+uv run scripts/augment_corpus.py         # -> corpus/wookieepedia_<view>/ (see below)
+uv run scripts/generate_questions.py     # -> questions/questions.jsonl
+uv run scripts/answer_questions.py       # -> sft/sft.jsonl
+uv run scripts/package.py                # -> dist/*.parquet + README + DATASHEET
 ```
 
 Every stage resumes. They keep a failure ledger under `*_state/` and skip work
 whose output already exists, so a killed run costs only what was in flight.
 
 ```bash
-uv run count.py --watch 10        # live inventory + paraphrase progress
-uv run wookiee_chat.py            # ask the corpus something
+uv run scripts/count.py --watch 10       # live inventory + paraphrase progress
+uv run scripts/wookiee_chat.py           # ask the corpus something
 ```
+
+### Augmentation
+
+`augment_corpus.py` is one engine; every form it can produce is a `[views.*]`
+table in `augment_views.toml`. Adding a ninth form means adding a prompt to that
+file, not touching the script.
+
+```bash
+uv run scripts/augment_corpus.py --list-views          # what is configured
+uv run scripts/augment_corpus.py --dry-run             # documents, tokens, cost
+uv run scripts/augment_corpus.py --views timeline,quiz # a subset
+uv run scripts/augment_corpus.py --sample 200 --views entityflip   # read it first
+```
+
+A view sets its own prompts, its own eligibility (minimum length, continuity
+allowlist, a regex the article must match — a timeline needs dates) and its own
+output gates. Every rewrite is checked against its source before it is written:
+no `BBY`/`ABY` date may appear that the input did not contain, the subject must
+still be named, and refusals and meta-talk ("the passage does not say…") are
+rejected and retried at a lower temperature. A view that cannot produce
+something faithful writes nothing — there is no fallback to the source text,
+because a directory of "timelines" that quietly contains copied articles is a
+lie about what it holds.
+
+`entityflip` is the one worth understanding. A model that reads "Ahsoka Tano
+was born on Shili" ten thousand times still tends to fail on "who was born on
+Shili?" — the reversal curse. That view restates each relation with the other
+entity as subject (`## Shili` → "Shili was the homeworld of the Togruta, among
+them Ahsoka Tano…"), one section per secondary entity, without inventing a
+direction the source never stated.
 
 ## Layout
 
 ```
-download_wookieepedia.py   MediaWiki XML dump -> Markdown, continuity-tagged
-paraphrase_corpus.py       article -> reworded twin, structure preserved
-generate_questions.py      article -> questions + evidence spans
-answer_questions.py        questions -> answers, via the tool-using teacher
-wookiee_chat.py            the teacher: agentic loop over the corpus, 3 tools
-corpus_scan.py             the full-text scan and its process pool
-package.py                 corpus + JSONL -> Parquet shards + dataset card
-upload_hf.py               dist/ -> a Hugging Face dataset repo
-count.py                   inventory and progress across every stage
+scripts/
+  download_wookieepedia.py  MediaWiki XML dump -> Markdown, continuity-tagged
+  paraphrase_corpus.py      article -> reworded twin, structure preserved
+  augment_corpus.py         article -> N rewrites in other forms, config-driven
+  generate_questions.py     article -> questions + evidence spans
+  answer_questions.py       questions -> answers, via the tool-using teacher
+  wookiee_chat.py           the teacher: agentic loop over the corpus, 3 tools
+  corpus_scan.py            the full-text scan and its process pool
+  package.py                corpus + JSONL -> Parquet shards + dataset card
+  upload_hf.py              dist/ -> a Hugging Face dataset repo
+  count.py                  inventory and progress across every stage
 
-tests/                     uv run tests/test_scan.py, tests/test_package.py
-tasks/                     working notes: todo.md, lessons.md
+augment_views.toml         the augmentation forms: prompts, gates, thresholds
+tests/                     uv run tests/test_scan.py, test_package.py,
+                           test_augment.py — all offline, none spend anything
 
 corpus/                    all text (gitignored, rebuilt by the pipeline)
 dist/                      packaged Parquet (gitignored, rebuilt by package.py)
 ```
+
+Every script anchors its paths at the repo root (`__file__`'s grandparent), so
+they run from anywhere. `augment_views.toml` stays at the root because it is
+configuration to be edited, not code.
 
 ## Packaging
 
@@ -120,9 +166,9 @@ asking whether a path exists — and the wrong shape for a dataloader, which pay
 a syscall per document.
 
 ```bash
-uv run package.py --dry-run             # the plan, writes nothing
-uv run package.py                       # dist/*.parquet, ~700 MB
-uv run package.py --include-restricted  # + books/scripts/subtitles, local only
+uv run scripts/package.py --dry-run             # the plan, writes nothing
+uv run scripts/package.py                       # dist/*.parquet, ~700 MB
+uv run scripts/package.py --include-restricted  # + books/scripts/subtitles, local only
 ```
 
 Output is deterministic: documents are enumerated in sorted path order and

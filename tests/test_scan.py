@@ -22,11 +22,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-import corpus_scan as cs  # noqa: E402
+import scripts.corpus_scan as cs  # noqa: E402
 
 
 def load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / filename)
+    spec = importlib.util.spec_from_file_location(
+        name, REPO_ROOT / "scripts" / filename)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)

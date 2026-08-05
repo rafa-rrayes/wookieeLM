@@ -26,15 +26,15 @@ tool results carry the reasoning. Pass --thinking for questions that need the
 model to plan several searches ahead.
 
 Requirements:
-    DEEPSEEK_API_KEY in the environment (or in a .env file beside this script)
+    DEEPSEEK_API_KEY in the environment (or in a .env file at the repo root)
     ~400 MB of disk under .index/ for the full-text index, built on the first
     search_text call and shared, read-only, by every later process
 
 Usage:
-    uv run wookiee_chat.py                          # interactive chat
-    uv run wookiee_chat.py --ask "Who was Ahsoka Tano's master?"
-    uv run wookiee_chat.py --thinking               # let it plan its searches
-    uv run wookiee_chat.py --show-tools             # print every tool result
+    uv run scripts/wookiee_chat.py                          # interactive chat
+    uv run scripts/wookiee_chat.py --ask "Who was Ahsoka Tano's master?"
+    uv run scripts/wookiee_chat.py --thinking               # let it plan its searches
+    uv run scripts/wookiee_chat.py --show-tools             # print every tool result
 """
 
 from __future__ import annotations
@@ -53,9 +53,17 @@ from pathlib import Path
 
 import httpx
 
-import corpus_scan as cs
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-REPO_ROOT = Path(__file__).resolve().parent
+# Under its real package name, not as a bare `corpus_scan`. The scan runs in a
+# process pool, and a worker resolves the function it was handed by importing
+# the module it came from -- so the name this module is bound to here is the
+# name a child process has to be able to import. Running this file directly
+# puts scripts/ on sys.path but not the repo root, hence the insert.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import scripts.corpus_scan as cs  # noqa: E402
 DEFAULT_CORPUS = REPO_ROOT / "corpus" / "wookieepedia"
 INDEX_DIR = REPO_ROOT / ".index"
 
@@ -751,7 +759,7 @@ def load_api_key() -> str:
             if name.strip() == "DEEPSEEK_API_KEY":
                 return value.strip().strip("'\"")
     sys.exit("DEEPSEEK_API_KEY is not set. export it, or put it in a .env file "
-             "beside this script, and rerun.")
+             "at the repo root, and rerun.")
 
 
 def main() -> None:

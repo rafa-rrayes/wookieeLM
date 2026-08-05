@@ -1,0 +1,257 @@
+# Augmentation views -- the forms augment_corpus.py rewrites each article into.
+#
+# One [views.<name>] table per form. Everything in [defaults] applies to every
+# view; a view repeats a key only to override it. Add a view by adding a table:
+# the engine reads this file and nothing else, and package.py reads the out_dir
+# of each view from here too, so a new form lands in the packaged dataset
+# without touching any code.
+#
+#   uv run augment_corpus.py --list-views          what is configured
+#   uv run augment_corpus.py --views timeline --sample 20 --dry-run
+#
+# Prompt rules:
+#   `system` must be CONSTANT for a view -- no placeholders. It is an identical
+#   prefix on every request in that view, which is the only reason the input
+#   bills at the cache-hit rate (~50x less). Per-article text belongs in
+#   `user_template`, which takes {title}, {continuity} and {passage}.
+#
+#   system_prefix + system + system_suffix are concatenated. The prefix carries
+#   the rules that hold whatever the form is, so they are written once and
+#   cannot drift between views.
+
+[defaults]
+
+# --- Model -------------------------------------------------------------------
+temperature = 1.0        # variety is the point; facts are pinned by the prompt
+thinking = false         # reasoning tokens bill as output; see augment_corpus.py
+max_attempts = 4
+
+# --- What gets sent ----------------------------------------------------------
+max_input_chars = 12000  # articles past this are condensed, never truncated blind
+infobox_chars = 1500
+include_infobox = true   # the infobox is the densest facts in a stub
+drop_tables = true       # a filmography grid eats the budget and teaches nothing
+min_body_chars = 400     # below this the article has too little to rewrite
+require_pattern = ""     # regex the source body must match to be eligible
+continuity = []          # [] = any; else e.g. ["canon", "legends", "non-canon"]
+
+# --- What comes back ---------------------------------------------------------
+min_out_chars = 200
+min_out_ratio = 0.0      # of packed input chars; 0 disables
+max_out_ratio = 1.5
+require_title = true     # the subject has to actually appear in the rewrite
+check_dates = true       # every "N BBY/ABY" in the output must be in the input
+est_out_ratio = 0.6      # --dry-run only: output chars per input char
+
+# Meta-talk. A rewrite that refers to the document it came from teaches a model
+# to talk about passages it cannot see, so it is rejected and re-asked. Kept
+# deliberately narrow -- a false positive costs a whole extra request.
+forbid = [
+  '\b(?:the|this|that) (?:article|passage|excerpt|infobox|source text)\b',
+  '\baccording to the (?:article|passage|text|source)\b',
+  '\bthe (?:above|following|given) (?:text|passage|information)\b',
+  '\bas an ai\b',
+]
+
+user_template = '''Subject: {title}
+Continuity: {continuity}
+
+Source material:
+
+{passage}'''
+
+system_prefix = '''You rewrite Star Wars encyclopedia material into other forms for a text corpus.
+
+Hard requirements, whatever the form:
+- Every fact must come from the source material. Do not add, speculate about, or embellish anything, and do not draw on knowledge from outside it.
+- Reproduce proper nouns exactly: characters, species, planets, ships, organisations, titles. Never translate, shorten, or invent a name.
+- Reproduce numbers, dates and era abbreviations (BBY, ABY) exactly as given. Never state a date that is not there, and never convert between BBY and ABY.
+- Where the source material does not support the form you are asked for, write what it does support. Do not fill the gap.
+- Never mention the source material, an article, a passage, a text, an infobox, or the fact that you were given anything. The result must read as writing about Star Wars, not writing about a document.
+
+'''
+
+system_suffix = '''
+
+Output only the finished piece. No preamble, no commentary, no code fences.'''
+
+
+# ---- Views -------------------------------------------------------------------
+
+[views.inuniverse]
+out_dir = "wookieepedia_inuniverse1"
+title_suffix = " (Archive entry)"
+# A real-world subject -- an actor, a novel, a release date -- has no
+# in-universe existence to write an archive entry about.
+continuity = ["canon", "legends", "non-canon"]
+min_body_chars = 600
+min_out_ratio = 0.3
+max_out_ratio = 1.4
+est_out_ratio = 0.85
+system = '''Write an in-universe encyclopedia entry about the subject, as it would appear in a reference work compiled inside the galaxy itself -- the Jedi Archives, an Imperial records office, a New Republic survey, a spacer's guide.
+
+Write from inside the setting. These events are recorded history, not fiction. Never mention films, novels, comics, games, actors, writers, episodes, release dates or any other real-world production detail; if the source material is largely about how the subject was made or published, write only about the subject as it exists in the galaxy and leave the rest out.
+
+Requirements:
+- Open with a definition sentence: what the subject is, and the one thing that makes it worth an entry.
+- Then cover it in a few short paragraphs, or under `## ` headings if the material is long enough to warrant them.
+- Keep the register of a reference work: measured, past tense, no drama and no editorialising.
+- Use every substantial fact the source material gives. This is a rewrite, not a summary.'''
+
+[views.timeline]
+out_dir = "wookieepedia_timeline1"
+title_suffix = " (Timeline)"
+min_body_chars = 800
+# No dates, no timeline. Cheaper to test here than to pay for the refusal.
+require_pattern = '\d[\d,]*\s*(?:BBY|ABY)\b'
+max_out_ratio = 1.0
+est_out_ratio = 0.4
+system = '''Turn the source material into a chronological timeline of the subject.
+
+Format, one event per line:
+
+    **19 BBY** -- Anakin Skywalker was made a Sith Lord by Darth Sidious and took the name Darth Vader.
+
+Requirements:
+- Order the dated entries from earliest to latest. BBY counts down towards 0 and ABY counts up from it, so 32 BBY comes before 19 BBY, which comes before 4 ABY.
+- Use only dates the source material states. Never infer, compute or convert one, and never guess an era.
+- Events the source material tells but does not date go under a final `## Undated` heading, one per line in the order the material gives them, with no date prefix.
+- Each line stands alone: name the people, places and things in full rather than writing "he" or "the planet".
+- One event per line. Do not merge a sequence into a single entry.'''
+
+[views.dialogue]
+out_dir = "wookieepedia_dialogue1"
+title_suffix = " (Dialogue)"
+continuity = ["canon", "legends", "non-canon"]
+min_body_chars = 800
+min_out_ratio = 0.3
+max_out_ratio = 1.5
+est_out_ratio = 0.9
+system = '''Write a conversation in which the facts of the source material are exchanged between two speakers.
+
+Format, one turn per line, blank line between turns:
+
+    **Archivist:** ...
+
+    **Padawan:** ...
+
+Requirements:
+- Choose two speakers who fit the subject and are invented for this conversation: an archivist and a padawan, an Imperial analyst and an aide, a spacer and a dock officer, a historian and a student. Vary them from subject to subject.
+- Never use a character named in the source material as a speaker. Do not invent words for anyone who actually exists -- these two are discussing the subject, not reenacting it.
+- One speaker knows the material and states it exactly as given. The other asks the questions a curious person would ask, in the order a curious person would ask them.
+- Between 8 and 20 turns, depending on how much the material holds. Cover the substantial facts, not just the opening.
+- Speech only. No stage directions, no narration, no scene setting, no asterisked actions.'''
+
+[views.quiz]
+out_dir = "wookieepedia_quiz1"
+title_suffix = " (Q&A)"
+# Lower than most views on purpose. A two-sentence stub cannot carry a timeline
+# or a dialogue, but "who was X?" asked of it is still a form the facts have
+# not appeared in, and a third of this corpus is stubs.
+min_body_chars = 250
+min_out_chars = 150
+max_out_ratio = 1.3
+est_out_ratio = 0.6
+system = '''Write question-and-answer pairs that the source material answers.
+
+Format, blank line between pairs:
+
+    **Q:** Which Togruta female served as Anakin Skywalker's Padawan learner?
+
+    **A:** Ahsoka Tano was the Togruta female who served as the Padawan learner of Anakin Skywalker.
+
+Requirements:
+- Between 5 and 15 pairs, depending on how much the material holds. Only ask what it answers.
+- Every question stands on its own. Name the subject in full -- "How tall was Ahsoka Tano?", never "How tall was she?".
+- Every answer is a complete sentence that restates what was asked: "Ahsoka Tano was born in 36 BBY.", never "36 BBY.".
+- Vary the shape: who, what, when, where, why, how many, which.
+- Include at least one pair that runs the other way -- the answer is the subject itself, asked from a fact about it, as in the example above.
+- Do not ask the same thing twice in different words.'''
+
+[views.entityflip]
+out_dir = "wookieepedia_entityflip1"
+title_suffix = " (Related entities)"
+# Also low. A stub states few relationships, but the reverse direction of them
+# exists nowhere else in the corpus, so it is the view a stub gains most from.
+min_body_chars = 300
+min_out_chars = 120
+min_out_ratio = 0.2
+max_out_ratio = 1.2
+est_out_ratio = 0.55
+system = '''The source material is an article about one subject. Rewrite its facts from the other side, so that the OTHER entities become the subject of the sentences.
+
+A model trained only on "A is B" often fails to answer "what is B?", so every relationship in the material has to appear in both directions somewhere in the corpus. This is the other direction.
+
+Find the entities the source material states a relationship about -- people, species, planets, ships, organisations, battles, events, titles, works -- and write a short passage about each of those, with that entity as the grammatical subject and the original subject appearing as an object.
+
+    given: Ahsoka Tano was a Togruta female born on Shili.
+    write: ## Shili
+
+           Shili was the homeworld of the Togruta, among them Ahsoka Tano,
+           who was born there.
+
+    given: Luke Skywalker was the son of Anakin Skywalker.
+    write: ## Anakin Skywalker
+
+           Anakin Skywalker had a son, Luke Skywalker.
+
+Format: a `## ` heading naming the entity exactly as the source material writes it, then 2 to 6 sentences about it.
+
+Requirements:
+- Up to 8 entities, the ones the material says the most about. Fewer is fine, and only entities the material states an actual relationship about -- skip anything it merely name-drops.
+- The entity is the subject of its own sentences. The article's original subject appears as an object, a possessor or inside a relative clause, not as the thing the sentence opens on.
+- Reverse only what is stated, and reverse it faithfully. "X fought at Y" becomes "Y was the site of a battle in which X fought", never "Y attacked X". Direction of a relationship is a fact like any other.
+- Do not add anything you know about the entity from elsewhere. Everything in its passage comes from the source material.'''
+
+[views.atomicfacts]
+out_dir = "wookieepedia_atomicfacts1"
+title_suffix = " (Facts)"
+min_body_chars = 300
+min_out_chars = 150
+min_out_ratio = 0.3
+max_out_ratio = 1.6
+est_out_ratio = 0.8
+system = '''Break the source material into standalone factual statements, one per line.
+
+    Ahsoka Tano was a Togruta female.
+    Ahsoka Tano served as the Padawan learner of Anakin Skywalker.
+    Ahsoka Tano left the Jedi Order in 19 BBY.
+
+Requirements:
+- One fact per line. No bullets, no numbering, no headings, no blank lines between them.
+- Every line is a complete sentence that makes sense entirely on its own, read in isolation and out of order. Name every participant in full, every time.
+- No pronouns of any kind -- no he, she, it, they, this, that, the former, the latter -- and no reference to another line.
+- Split compound statements. "Ahsoka Tano was a Togruta female who served Anakin Skywalker" is two facts, not one.
+- Between 15 and 60 lines, depending on how much the material holds. Cover all of it, not just the opening.
+- Do not repeat a fact in different words.'''
+
+[views.summary]
+out_dir = "wookieepedia_summary1"
+title_suffix = " (Summary)"
+min_body_chars = 600
+min_out_chars = 300
+max_out_ratio = 0.6
+est_out_ratio = 0.18
+system = '''Write a single dense paragraph about the subject: what a reader would need if this were the only paragraph about it they ever read.
+
+Requirements:
+- Between 3 and 8 sentences. One paragraph, no headings, no lists.
+- Lead with what the subject is, then the facts that matter most: who, what, where, when, and what came of it.
+- Dense with names, dates and numbers, taken exactly as given.
+- No hedging, no "notably", no "it is worth mentioning", no closing flourish about legacy or importance unless the source material states one.'''
+
+[views.explainer]
+out_dir = "wookieepedia_explainer1"
+title_suffix = " (Explainer)"
+min_body_chars = 400
+min_out_ratio = 0.25
+max_out_ratio = 1.3
+est_out_ratio = 0.6
+system = '''Explain the subject in plain language, to a reader who knows nothing about Star Wars.
+
+Requirements:
+- Between 2 and 5 short paragraphs.
+- Define setting-specific terms in passing, the first time each appears: "a Padawan, a Jedi apprentice", "the Outer Rim, the sparsely settled edge of the galaxy". Define only terms the source material actually uses.
+- Plain words and short sentences. No jargon left unexplained, and no assumed familiarity with any character, planet or faction.
+- Keep every name, date and number exactly as given -- simplify the language, never the facts.
+- Do not compare the subject to anything outside Star Wars, and do not address the reader as "you".'''
